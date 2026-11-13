@@ -485,6 +485,7 @@ function CuratorPanel({
       {form === "article" && (
         <ArticleForm onCancel={() => setForm(null)} onSubmit={(item) => add("article", item)} />
       )}
+      <CleanupPanel board={board} onChanged={onChanged} />
       <details style={{ marginTop: 12 }}>
         <summary style={{ fontWeight: 800, cursor: "pointer" }}>Hapus item (kurator)</summary>
         <p className="item-meta">
@@ -498,6 +499,97 @@ function CuratorPanel({
             ))}
         </p>
       </details>
+    </div>
+  );
+}
+
+function CleanupPanel({ board, onChanged }: { board: Board; onChanged: () => void }) {
+  const [preview, setPreview] = useState<
+    { id: number; subject: string; date: string; reasonLabel: string }[] | null
+  >(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+  const isSeed = board.source === "seed";
+
+  async function callCleanup(dryRun: boolean) {
+    setBusy(true);
+    setError("");
+    setMsg("");
+    const r = await fetch("/api/curator/cleanup", {
+      body: JSON.stringify({ dryRun }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok) {
+      setError(d.error ?? "Gagal memeriksa jadwal lama.");
+      return;
+    }
+    if (dryRun) {
+      setPreview(d.items ?? []);
+      if ((d.count ?? 0) === 0) setMsg("Tidak ada jadwal lama yang perlu dihapus.");
+    } else {
+      setPreview(null);
+      setMsg(`Berhasil menghapus ${d.deleted ?? 0} jadwal lama.`);
+      onChanged();
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3 className="item-title" style={{ marginTop: 0 }}>
+        Bersihkan Jadwal Lama
+      </h3>
+      <p className="item-meta">
+        Jadwal Sevima bulan lalu dihapus saat ganti bulan. Jadwal Zoom dihapus bila sudah lewat
+        lebih dari 3 hari. Jadwal bulan berjalan dan jadwal masa depan tidak pernah dihapus.
+        Info, tugas, dan artikel tidak disentuh.
+      </p>
+      {isSeed ? (
+        <p className="notice warn">
+          Database belum disiapkan (mode baca saja), jadi bersih-bersih belum bisa jalan. Ikuti
+          README bagian Supabase, lalu deploy ulang.
+        </p>
+      ) : (
+        <>
+          <p>
+            <button className="btn secondary" onClick={() => callCleanup(true)} disabled={busy}>
+              {busy ? "Memeriksa…" : "Lihat jadwal yang akan dihapus"}
+            </button>
+          </p>
+          {preview !== null && preview.length > 0 && (
+            <>
+              <p className="item-meta">
+                {preview.length} jadwal akan dihapus:
+              </p>
+              <ul style={{ margin: "4px 0 12px", paddingLeft: 20 }}>
+                {preview.map((c) => (
+                  <li key={c.id} className="item-meta">
+                    {displaySubject(c.subject)} · {shortDate(c.date)} · {c.reasonLabel}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                <button
+                  className="btn danger"
+                  onClick={() => {
+                    if (window.confirm(`Hapus ${preview.length} jadwal lama ini?`)) {
+                      callCleanup(false);
+                    }
+                  }}
+                  disabled={busy}
+                >
+                  {busy ? "Menghapus…" : `Hapus ${preview.length} jadwal`}
+                </button>
+              </p>
+            </>
+          )}
+        </>
+      )}
+      {error && <p style={{ color: "#b91c1c" }}>{error}</p>}
+      {msg && <p className="notice info">{msg}</p>}
     </div>
   );
 }
