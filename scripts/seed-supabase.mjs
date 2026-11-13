@@ -59,4 +59,21 @@ for (const [table, file] of jobs) {
   }
   console.log(`${table}: ${rows.length} baris tersimpan.`);
 }
+
+// Seed memakai id eksplisit, jadi sequence identity tiap tabel harus dimajukan
+// ke id terbesar — kalau tidak, insert kurator berikutnya gagal
+// "duplicate key value violates unique constraint ..._pkey".
+const { error: resetError } = await sb.rpc("reset_identity_sequences");
+if (resetError) {
+  console.error(
+    "PERINGATAN: reset_identity_sequences gagal (" + resetError.message + "). " +
+    "Seed tetap selesai, tapi jalankan SQL ini di SQL Editor Supabase agar insert kurator tidak gagal:\n" +
+    "SELECT setval(pg_get_serial_sequence('schedule_items','id'), (SELECT MAX(id) FROM schedule_items));\n" +
+    "SELECT setval(pg_get_serial_sequence('info_posts','id'), (SELECT MAX(id) FROM info_posts));\n" +
+    "SELECT setval(pg_get_serial_sequence('tasks','id'), (SELECT MAX(id) FROM tasks));\n" +
+    "SELECT setval(pg_get_serial_sequence('articles','id'), (SELECT MAX(id) FROM articles));",
+  );
+} else {
+  console.log("Sequence id tiap tabel sudah direset ke id terbesar.");
+}
 console.log("Seed Supabase selesai.");
