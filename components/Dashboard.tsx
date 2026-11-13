@@ -224,7 +224,7 @@ function ZoomButton({ item }: { item: ScheduleItem }) {
   return <p className="item-meta">Link Zoom dimasukkan kurator.</p>;
 }
 
-function ScheduleCard({ item }: { item: ScheduleItem }) {
+function ScheduleCard({ item, onDelete }: { item: ScheduleItem; onDelete?: () => void }) {
   return (
     <article className="card">
       <div className="item-row">
@@ -255,13 +255,20 @@ function ScheduleCard({ item }: { item: ScheduleItem }) {
           )}
           {item.note && <p className="item-meta">{item.note}</p>}
           <ZoomButton item={item} />
+          {onDelete && (
+            <p style={{ marginTop: 10 }}>
+              <button className="btn danger small" onClick={onDelete}>
+                Hapus
+              </button>
+            </p>
+          )}
         </div>
       </div>
     </article>
   );
 }
 
-function InfoCard({ post }: { post: InfoPost }) {
+function InfoCard({ post, onDelete }: { post: InfoPost; onDelete?: () => void }) {
   return (
     <article className="card">
       {post.urgent && <span className="badge urgent">Penting</span>}{" "}
@@ -278,11 +285,18 @@ function InfoCard({ post }: { post: InfoPost }) {
         {post.subject ? ` · ${displaySubject(post.subject)}` : ""}
         {post.expiresDate ? ` · Berlaku s.d. ${shortDate(post.expiresDate)}` : ""}
       </p>
+      {onDelete && (
+        <p style={{ marginTop: 10 }}>
+          <button className="btn danger small" onClick={onDelete}>
+            Hapus
+          </button>
+        </p>
+      )}
     </article>
   );
 }
 
-function TaskCard({ task }: { task: Task }) {
+function TaskCard({ task, onDelete }: { task: Task; onDelete?: () => void }) {
   const d = daysUntil(task.deadlineDate);
   const badge = d < 0 ? "Lewat" : d === 0 ? "Hari ini" : d === 1 ? "Besok" : `H-${d}`;
   const cls = d <= 2 ? "soon" : d <= 5 ? "mid" : "later";
@@ -298,13 +312,26 @@ function TaskCard({ task }: { task: Task }) {
             {displaySubject(task.subject)} · Tenggat {shortDate(task.deadlineDate)} ·{" "}
             {task.deadlineTime} WIB
           </p>
+          {onDelete && (
+            <p style={{ marginTop: 10 }}>
+              <button className="btn danger small" onClick={onDelete}>
+                Hapus
+              </button>
+            </p>
+          )}
         </div>
       </div>
     </article>
   );
 }
 
-function ArticleCard({ article }: { article: Article }) {
+function ArticleCard({
+  article,
+  onDelete,
+}: {
+  article: Article;
+  onDelete?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const isVideo = article.mediaType === "video" && article.mediaUrl.startsWith("http");
   return (
@@ -343,6 +370,11 @@ function ArticleCard({ article }: { article: Article }) {
         <button className="btn secondary" onClick={() => setOpen(!open)}>
           {open ? "Tutup artikel" : "Baca artikel"}
         </button>
+        {onDelete && (
+          <button className="btn danger small" onClick={onDelete} style={{ marginLeft: 8 }}>
+            Hapus
+          </button>
+        )}
       </p>
     </article>
   );
@@ -352,23 +384,24 @@ function ArticleCard({ article }: { article: Article }) {
 function CuratorPanel({
   board,
   onChanged,
+  authed,
+  onAuthChange,
+  remove,
+  opError,
+  setOpError,
 }: {
   board: Board;
   onChanged: () => void;
+  authed: boolean;
+  onAuthChange: (v: boolean) => void;
+  remove: (collection: string, id: number) => Promise<void>;
+  opError: string;
+  setOpError: (v: string) => void;
 }) {
-  const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [opError, setOpError] = useState("");
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState<"schedule" | "info" | "task" | "article" | null>(null);
-
-  useEffect(() => {
-    fetch("/api/curator/me")
-      .then((r) => r.json())
-      .then((d) => setAuthed(Boolean(d.loggedIn)))
-      .catch(() => undefined);
-  }, []);
 
   async function login(e: React.FormEvent) {
     e.preventDefault();
@@ -381,7 +414,7 @@ function CuratorPanel({
     });
     setBusy(false);
     if (r.ok) {
-      setAuthed(true);
+      onAuthChange(true);
       setPassword("");
     } else {
       setError("Password kurator salah.");
@@ -390,27 +423,7 @@ function CuratorPanel({
 
   async function logout() {
     await fetch("/api/curator/logout", { method: "POST" });
-    setAuthed(false);
-  }
-
-  async function remove(collection: string, id: number) {
-    if (!window.confirm("Hapus item ini?")) return;
-    setOpError("");
-    try {
-      const r = await fetch("/api/curator/items", {
-        body: JSON.stringify({ collection, id }),
-        headers: { "Content-Type": "application/json" },
-        method: "DELETE",
-      });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        setOpError(d.error ?? "Gagal menghapus.");
-        return;
-      }
-      onChanged();
-    } catch {
-      setOpError("Gagal menghapus: tidak bisa menghubungi server. Periksa koneksi internet, lalu coba lagi.");
-    }
+    onAuthChange(false);
   }
 
   async function add(collection: string, item: Record<string, unknown>) {
@@ -502,19 +515,6 @@ function CuratorPanel({
         </p>
       )}
       <CleanupPanel board={board} onChanged={onChanged} />
-      <details style={{ marginTop: 12 }}>
-        <summary style={{ fontWeight: 800, cursor: "pointer" }}>Hapus item (kurator)</summary>
-        <p className="item-meta">
-          Jadwal:{" "}
-          {board.schedule
-            .filter((s) => s.isExample)
-            .map((s) => (
-              <button key={s.id} className="btn danger" onClick={() => remove("schedule", s.id)}>
-                Hapus contoh #{s.id}
-              </button>
-            ))}
-        </p>
-      </details>
     </div>
   );
 }
@@ -841,6 +841,8 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
   const [infoCategory, setInfoCategory] = useState("semua");
   const [infoQuery, setInfoQuery] = useState("");
   const [dateKicker, setDateKicker] = useState("");
+  const [curatorAuthed, setCuratorAuthed] = useState(false);
+  const [opError, setOpError] = useState("");
 
   useEffect(() => {
     setDark(document.documentElement.classList.contains("dark"));
@@ -869,6 +871,33 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
   async function refreshBoard() {
     const r = await fetch("/api/board");
     if (r.ok) setBoard(await r.json());
+  }
+
+  useEffect(() => {
+    fetch("/api/curator/me")
+      .then((r) => r.json())
+      .then((d) => setCuratorAuthed(Boolean(d.loggedIn)))
+      .catch(() => undefined);
+  }, []);
+
+  async function remove(collection: string, id: number) {
+    if (!window.confirm("Hapus item ini?")) return;
+    setOpError("");
+    try {
+      const r = await fetch("/api/curator/items", {
+        body: JSON.stringify({ collection, id }),
+        headers: { "Content-Type": "application/json" },
+        method: "DELETE",
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setOpError(d.error ?? "Gagal menghapus.");
+        return;
+      }
+      refreshBoard();
+    } catch {
+      setOpError("Gagal menghapus: tidak bisa menghubungi server. Periksa koneksi internet, lalu coba lagi.");
+    }
   }
 
   const nextClass = useMemo(() => {
@@ -958,6 +987,12 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
 
       <Hero />
 
+      {opError && (
+        <p role="alert" style={{ color: "#b91c1c" }}>
+          {opError}
+        </p>
+      )}
+
       {tab === "beranda" && (
         <>
           <h2 className="section-title">Kelas Berikutnya</h2>
@@ -997,7 +1032,11 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
           ) : (
             <div className="list">
               {zoomSoon.map((s) => (
-                <ScheduleCard key={s.id} item={s} />
+                <ScheduleCard
+                  key={s.id}
+                  item={s}
+                  onDelete={curatorAuthed ? () => remove("schedule", s.id) : undefined}
+                />
               ))}
             </div>
           )}
@@ -1008,7 +1047,11 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
           ) : (
             <div className="list">
               {tasksSoon.map((t) => (
-                <TaskCard key={t.id} task={t} />
+                <TaskCard
+                  key={t.id}
+                  task={t}
+                  onDelete={curatorAuthed ? () => remove("task", t.id) : undefined}
+                />
               ))}
             </div>
           )}
@@ -1027,7 +1070,11 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
                 <h3 style={{ margin: "18px 0 10px" }}>{dateLabel(date)}</h3>
                 <div className="list">
                   {items.map((s) => (
-                    <ScheduleCard key={s.id} item={s} />
+                    <ScheduleCard
+                      key={s.id}
+                      item={s}
+                      onDelete={curatorAuthed ? () => remove("schedule", s.id) : undefined}
+                    />
                   ))}
                 </div>
               </div>
@@ -1068,7 +1115,11 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
           ) : (
             <div className="list">
               {infoFiltered.map((p) => (
-                <InfoCard key={p.id} post={p} />
+                <InfoCard
+                  key={p.id}
+                  post={p}
+                  onDelete={curatorAuthed ? () => remove("info", p.id) : undefined}
+                />
               ))}
             </div>
           )}
@@ -1085,7 +1136,11 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
               {[...board.tasks]
                 .sort((a, b) => a.deadlineDate.localeCompare(b.deadlineDate))
                 .map((t) => (
-                  <TaskCard key={t.id} task={t} />
+                  <TaskCard
+                    key={t.id}
+                    task={t}
+                    onDelete={curatorAuthed ? () => remove("task", t.id) : undefined}
+                  />
                 ))}
             </div>
           )}
@@ -1101,7 +1156,11 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
           ) : (
             <div className="list">
               {articlesFiltered.map((a) => (
-                <ArticleCard key={a.id} article={a} />
+                <ArticleCard
+                  key={a.id}
+                  article={a}
+                  onDelete={curatorAuthed ? () => remove("article", a.id) : undefined}
+                />
               ))}
             </div>
           )}
@@ -1117,7 +1176,15 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
                 <Icon name="x" />
               </button>
             </div>
-            <CuratorPanel board={board} onChanged={refreshBoard} />
+            <CuratorPanel
+              board={board}
+              onChanged={refreshBoard}
+              authed={curatorAuthed}
+              onAuthChange={setCuratorAuthed}
+              remove={remove}
+              opError={opError}
+              setOpError={setOpError}
+            />
             <p className="item-meta" style={{ marginTop: 12 }}>
               Dashboard ini tidak memfasilitasi presensi kelas sama sekali. Presensi tetap lewat
               QR Sevima.
