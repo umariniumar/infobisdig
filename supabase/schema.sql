@@ -80,3 +80,23 @@ drop policy if exists "baca bebas" on tasks;
 create policy "baca bebas" on tasks for select using (true);
 drop policy if exists "baca bebas" on articles;
 create policy "baca bebas" on articles for select using (true);
+
+-- Penjaga urutan id (identity sequence) setelah seed.
+-- Seed memasukkan baris dengan id eksplisit (jadwal 1–67, info 1–3, tugas 1–4,
+-- artikel 1–10), sementara sequence identity tiap tabel masih di 1 — tanpa
+-- reset, insert kurator berikutnya gagal "duplicate key value violates unique
+-- constraint ..._pkey". Script seed memanggil fungsi ini setelah upsert.
+-- Bila setup dari nol, jalankan file ini (atau potongan fungsi ini) di SQL Editor.
+create or replace function public.reset_identity_sequences()
+returns void
+language sql
+security definer
+as $$
+  select setval(pg_get_serial_sequence('schedule_items', 'id'), (select max(id) from schedule_items));
+  select setval(pg_get_serial_sequence('info_posts', 'id'), (select max(id) from info_posts));
+  select setval(pg_get_serial_sequence('tasks', 'id'), (select max(id) from tasks));
+  select setval(pg_get_serial_sequence('articles', 'id'), (select max(id) from articles));
+$$;
+
+revoke all on function public.reset_identity_sequences() from public;
+grant execute on function public.reset_identity_sequences() to service_role;
