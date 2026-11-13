@@ -105,6 +105,13 @@ mengisi link Zoom asli dan info baru, **Supabase wajib disiapkan** (gratis).
    `articles: 10 baris tersimpan.` Lalu buka **Table Editor** di Supabase dan
    lihat isi tabelnya — jadwal Ekonomi Regional 16 Nov 2026 harus ada.
 
+   > **Catatan:** seed memasukkan baris dengan id eksplisit, lalu memanggil
+   > fungsi `reset_identity_sequences()` agar urutan id tiap tabel maju ke id
+   > terbesar. Bila setup dari nol dan seed menampilkan peringatan bahwa rpc
+   > gagal, jalankan potongan SQL `setval` dari akhir file
+   > `supabase/schema.sql` di SQL Editor — kalau tidak, tambah data oleh
+   > kurator akan gagal "duplicate key".
+
 ### Langkah 4 — Deploy ke Vercel
 
 1. Buka [vercel.com](https://vercel.com), masuk dengan akun GitHub.
