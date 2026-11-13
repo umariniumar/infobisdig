@@ -359,6 +359,7 @@ function CuratorPanel({
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [opError, setOpError] = useState("");
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState<"schedule" | "info" | "task" | "article" | null>(null);
 
@@ -394,32 +395,42 @@ function CuratorPanel({
 
   async function remove(collection: string, id: number) {
     if (!window.confirm("Hapus item ini?")) return;
-    const r = await fetch("/api/curator/items", {
-      body: JSON.stringify({ collection, id }),
-      headers: { "Content-Type": "application/json" },
-      method: "DELETE",
-    });
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}));
-      alert(d.error ?? "Gagal menghapus.");
-      return;
+    setOpError("");
+    try {
+      const r = await fetch("/api/curator/items", {
+        body: JSON.stringify({ collection, id }),
+        headers: { "Content-Type": "application/json" },
+        method: "DELETE",
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setOpError(d.error ?? "Gagal menghapus.");
+        return;
+      }
+      onChanged();
+    } catch {
+      setOpError("Gagal menghapus: tidak bisa menghubungi server. Periksa koneksi internet, lalu coba lagi.");
     }
-    onChanged();
   }
 
   async function add(collection: string, item: Record<string, unknown>) {
-    const r = await fetch("/api/curator/items", {
-      body: JSON.stringify({ collection, item }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    });
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}));
-      alert(d.error ?? "Gagal menyimpan.");
-      return;
+    setOpError("");
+    try {
+      const r = await fetch("/api/curator/items", {
+        body: JSON.stringify({ collection, item }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setOpError(d.error ?? "Gagal menyimpan.");
+        return;
+      }
+      setForm(null);
+      onChanged();
+    } catch {
+      setOpError("Gagal menyimpan: tidak bisa menghubungi server. Periksa koneksi internet, lalu coba lagi.");
     }
-    setForm(null);
-    onChanged();
   }
 
   if (!authed) {
@@ -485,6 +496,11 @@ function CuratorPanel({
       {form === "article" && (
         <ArticleForm onCancel={() => setForm(null)} onSubmit={(item) => add("article", item)} />
       )}
+      {opError && (
+        <p role="alert" style={{ color: "#b91c1c" }}>
+          {opError}
+        </p>
+      )}
       <CleanupPanel board={board} onChanged={onChanged} />
       <details style={{ marginTop: 12 }}>
         <summary style={{ fontWeight: 800, cursor: "pointer" }}>Hapus item (kurator)</summary>
@@ -516,24 +532,29 @@ function CleanupPanel({ board, onChanged }: { board: Board; onChanged: () => voi
     setBusy(true);
     setError("");
     setMsg("");
-    const r = await fetch("/api/curator/cleanup", {
-      body: JSON.stringify({ dryRun }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    });
-    const d = await r.json().catch(() => ({}));
-    setBusy(false);
-    if (!r.ok) {
-      setError(d.error ?? "Gagal memeriksa jadwal lama.");
-      return;
-    }
-    if (dryRun) {
-      setPreview(d.items ?? []);
-      if ((d.count ?? 0) === 0) setMsg("Tidak ada jadwal lama yang perlu dihapus.");
-    } else {
-      setPreview(null);
-      setMsg(`Berhasil menghapus ${d.deleted ?? 0} jadwal lama.`);
-      onChanged();
+    try {
+      const r = await fetch("/api/curator/cleanup", {
+        body: JSON.stringify({ dryRun }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const d = await r.json().catch(() => ({}));
+      setBusy(false);
+      if (!r.ok) {
+        setError(d.error ?? "Gagal memeriksa jadwal lama.");
+        return;
+      }
+      if (dryRun) {
+        setPreview(d.items ?? []);
+        if ((d.count ?? 0) === 0) setMsg("Tidak ada jadwal lama yang perlu dihapus.");
+      } else {
+        setPreview(null);
+        setMsg(`Berhasil menghapus ${d.deleted ?? 0} jadwal lama.`);
+        onChanged();
+      }
+    } catch {
+      setBusy(false);
+      setError("Gagal menghubungi server. Periksa koneksi internet, lalu coba lagi.");
     }
   }
 
