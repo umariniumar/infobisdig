@@ -148,6 +148,33 @@ mengisi link Zoom asli dan info baru, **Supabase wajib disiapkan** (gratis).
 3. Minta 2–3 mahasiswa mencoba buka dari HP-nya dan melaporkan bila ada yang
    aneh (tampilan, jadwal yang salah, atau link yang tidak bisa dibuka).
 
+## Bersihkan jadwal lama (retensi)
+
+Supaya data tidak menumpuk, jadwal lama dihapus otomatis dengan dua aturan ini:
+
+| Aturan | Yang dihapus |
+| --- | --- |
+| **Jadwal Sevima, ganti bulan** | Jadwal `origin=sevima` yang tanggalnya sebelum tanggal 1 bulan berjalan DAN sudah lewat. Jadwal bulan berjalan tetap dipertahankan, termasuk yang sudah lewat di bulan yang sama. Jadwal masa depan tidak pernah dihapus. |
+| **Jadwal Zoom, lewat 3 hari** | Jadwal `mode=zoom` (origin apa pun) yang tanggalnya sudah lewat lebih dari 3 hari. |
+
+Contoh (hari ini 13 Nov 2026): jadwal Sevima 28 Okt 2026 terhapus (bulan lalu), jadwal Sevima 10 Nov 2026 tetap ada (bulan berjalan, walau sudah lewat), Zoom 9 Nov 2026 terhapus (lewat 4 hari), Zoom 10 Nov 2026 tetap ada (baru lewat 3 hari), dan semua jadwal 14 Nov 2026 ke atas aman.
+
+Yang dihapus hanya `schedule_items`. Info, tugas, dan artikel tidak pernah disentuh. Data seed di `data/*.json` juga tidak diubah — yang dihapus hanya baris di Supabase.
+
+### Otomatis (cron harian, 01:00 WIB)
+
+1. Di Vercel: Project → **Settings → Environment Variables**, tambah `CRON_SECRET` dengan nilai acak yang panjang (misal 32 karakter huruf+angka). Jangan pakai password akun lain.
+2. **Redeploy** agar cron aktif (cron dibaca dari `vercel.json` saat deploy).
+3. Cron jalan tiap hari 01:00 WIB (18:00 UTC) ke `GET /api/cron/cleanup`. Vercel mengirim header `Authorization: Bearer <CRON_SECRET>` secara otomatis. Hasilnya tercatat di Vercel → **Logs**. Tanpa `CRON_SECRET`, endpoint mengembalikan 503 dan tidak ada yang dihapus.
+4. Catatan: paket gratis (Hobby) Vercel hanya mengizinkan cron harian — jadwal sekali sehari di atas sudah sesuai.
+
+### Manual (panel kurator)
+
+1. Buka website, login kurator (ikon di kanan atas).
+2. Di panel kurator, bagian **Bersihkan Jadwal Lama**, klik **Lihat jadwal yang akan dihapus** — ini hanya preview, tidak ada yang terhapus.
+3. Bila daftarnya sudah benar, klik **Hapus N jadwal** dan konfirmasi. Daftar jadwal ikut diperbarui.
+4. Bila masih mode seed (Supabase belum disiapkan), tombolnya menampilkan pesan database belum disiapkan — bersih-bersih tidak bisa jalan di mode seed.
+
 ## Menjalankan di komputer sendiri (opsional, untuk tes)
 
 ```bash
