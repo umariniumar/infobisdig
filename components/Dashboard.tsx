@@ -224,6 +224,51 @@ function ZoomButton({ item }: { item: ScheduleItem }) {
   return <p className="item-meta">Link Zoom dimasukkan kurator.</p>;
 }
 
+// ---------- tombol hapus dua langkah (kurator) ----------
+// Klik pertama hanya mempersenjatai tombol ("Yakin hapus?"), klik kedua pada
+// tombol yang sama baru benar-benar menghapus. Bila tidak diklik kedua dalam
+// 5 detik, tombol kembali ke "Hapus". Tiap kartu punya instance sendiri,
+// jadi mempersenjatai satu kartu tidak mempersenjatai kartu lain. Sengaja
+// tidak pakai window.confirm — dialog itu tidak muncul/tepercaya di semua
+// browser.
+function ConfirmDeleteButton({
+  onConfirm,
+  style,
+}: {
+  onConfirm: () => void;
+  style?: React.CSSProperties;
+}) {
+  const [armed, setArmed] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+  return (
+    <button
+      className={armed ? "btn danger small armed" : "btn danger small"}
+      style={style}
+      onClick={() => {
+        if (armed) {
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = null;
+          setArmed(false);
+          onConfirm();
+          return;
+        }
+        setArmed(true);
+        timer.current = setTimeout(() => {
+          setArmed(false);
+          timer.current = null;
+        }, 5000);
+      }}
+    >
+      {armed ? "Yakin hapus?" : "Hapus"}
+    </button>
+  );
+}
+
 function ScheduleCard({ item, onDelete }: { item: ScheduleItem; onDelete?: () => void }) {
   return (
     <article className="card">
@@ -257,9 +302,7 @@ function ScheduleCard({ item, onDelete }: { item: ScheduleItem; onDelete?: () =>
           <ZoomButton item={item} />
           {onDelete && (
             <p style={{ marginTop: 10 }}>
-              <button className="btn danger small" onClick={onDelete}>
-                Hapus
-              </button>
+              <ConfirmDeleteButton onConfirm={onDelete} />
             </p>
           )}
         </div>
@@ -287,9 +330,7 @@ function InfoCard({ post, onDelete }: { post: InfoPost; onDelete?: () => void })
       </p>
       {onDelete && (
         <p style={{ marginTop: 10 }}>
-          <button className="btn danger small" onClick={onDelete}>
-            Hapus
-          </button>
+          <ConfirmDeleteButton onConfirm={onDelete} />
         </p>
       )}
     </article>
@@ -314,9 +355,7 @@ function TaskCard({ task, onDelete }: { task: Task; onDelete?: () => void }) {
           </p>
           {onDelete && (
             <p style={{ marginTop: 10 }}>
-              <button className="btn danger small" onClick={onDelete}>
-                Hapus
-              </button>
+              <ConfirmDeleteButton onConfirm={onDelete} />
             </p>
           )}
         </div>
@@ -371,9 +410,7 @@ function ArticleCard({
           {open ? "Tutup artikel" : "Baca artikel"}
         </button>
         {onDelete && (
-          <button className="btn danger small" onClick={onDelete} style={{ marginLeft: 8 }}>
-            Hapus
-          </button>
+          <ConfirmDeleteButton onConfirm={onDelete} style={{ marginLeft: 8 }} />
         )}
       </p>
     </article>
@@ -881,7 +918,6 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
   }, []);
 
   async function remove(collection: string, id: number) {
-    if (!window.confirm("Hapus item ini?")) return;
     setOpError("");
     try {
       const r = await fetch("/api/curator/items", {
