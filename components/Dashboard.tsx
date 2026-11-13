@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Article, Board, InfoPost, ScheduleItem, Task } from "../lib/types";
 import { SUBJECTS, displaySubject } from "../lib/types";
 import { Icon, subjectIcon, type IconName } from "./icons";
@@ -43,8 +43,36 @@ function daysUntil(iso: string): number {
   const target = new Date(`${iso}T00:00:00+07:00`).getTime();
   return Math.round((target - today) / 86400000);
 }
+function jakartaMs(date: string, time: string): number {
+  return new Date(`${date}T${time}:00+07:00`).getTime();
+}
+function isPastSchedule(s: ScheduleItem): boolean {
+  const today = todayJakarta();
+  if (s.date < today) return true;
+  if (s.date === today) return s.endTime <= nowTimeJakarta();
+  return false;
+}
+function isExpiredInfo(p: InfoPost): boolean {
+  return Boolean(p.expiresDate) && p.expiresDate < todayJakarta();
+}
+function countdownLabel(item: ScheduleItem, nowMs: number): string {
+  const start = jakartaMs(item.date, item.startTime);
+  const end = jakartaMs(item.date, item.endTime);
+  if (nowMs >= start && nowMs < end) return "Sedang berlangsung";
+  const diffMin = Math.max(0, Math.round((start - nowMs) / 60000));
+  if (diffMin < 60) return `Mulai ${diffMin} menit lagi`;
+  const h = Math.floor(diffMin / 60);
+  const m = diffMin % 60;
+  if (item.date === todayJakarta()) {
+    return m === 0 ? `Mulai ${h} jam lagi` : `Mulai ${h} jam ${m} menit lagi`;
+  }
+  return `Mulai ${shortDate(item.date)}, ${item.startTime}`;
+}
 
 // ---------- ikon hero yang beranimasi ----------
+// Indeks awal disamakan untuk ketiga slot agar trio pertama yang tampil
+// adalah kalender / megaphone / chart; urutan pergantian tiap 3 detik
+// tetap sama per slot.
 const HERO_SETS: { color: "blue" | "red" | "green"; icons: IconName[] }[] = [
   { color: "blue", icons: ["calendar", "clock", "list"] },
   { color: "red", icons: ["megaphone", "bell", "newspaper"] },
@@ -53,7 +81,7 @@ const HERO_SETS: { color: "blue" | "red" | "green"; icons: IconName[] }[] = [
 
 function HeroIcon({ slot, step }: { slot: number; step: number }) {
   const set = HERO_SETS[slot];
-  const icon = set.icons[(step + slot) % set.icons.length];
+  const icon = set.icons[step % set.icons.length];
   return (
     <span className={`hero-icon ${set.color}`} aria-hidden="true">
       <span className="pop" key={icon}>
@@ -97,17 +125,18 @@ function Hero() {
   );
 }
 
-// ---------- bottom sheet pilih mata kuliah ----------
-function SubjectPicker({
-  value,
-  onPick,
+// ---------- bottom sheet generik ----------
+// Dipakai untuk "Pilih Mata Kuliah" dan form kurator (tambah/ubah).
+// Gagang seret, tutup bila diseret >90px, tombol tutup berupa teks "✕ Tutup".
+function BottomSheet({
+  title,
   onClose,
+  children,
 }: {
-  value: string;
-  onPick: (v: string) => void;
+  title: string;
   onClose: () => void;
+  children: React.ReactNode;
 }) {
-  const listRef = useRef<HTMLDivElement>(null);
   const [dragY, setDragY] = useState(0);
   const startY = useRef(0);
   useEffect(() => {
@@ -116,14 +145,13 @@ function SubjectPicker({
       document.body.style.overflow = "";
     };
   }, []);
-  const options = [{ canonical: "", display: "Semua mata kuliah" }, ...SUBJECTS];
   return (
     <div
       className="sheet-backdrop"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Pilih Mata Kuliah"
+      aria-label={title}
     >
       <div
         className="sheet"
@@ -143,32 +171,50 @@ function SubjectPicker({
       >
         <div className="sheet-handle" />
         <div className="sheet-head">
-          <h3>Pilih Mata Kuliah</h3>
-          <button className="icon-btn" onClick={onClose} aria-label="Tutup">
-            <Icon name="x" />
+          <h3>{title}</h3>
+          <button className="sheet-close" onClick={onClose}>
+            ✕ Tutup
           </button>
         </div>
-        <div className="sheet-list" ref={listRef}>
-          {options.map((o) => (
-            <button
-              key={o.canonical || "semua"}
-              className={`sheet-option ${value === o.canonical ? "active" : ""}`}
-              onClick={() => {
-                onPick(o.canonical);
-                onClose();
-              }}
-            >
-              <span className="item-icon">
-                <Icon name={o.canonical ? subjectIcon(o.canonical) : "grid"} />
-              </span>
-              {o.display}
-              <span className="spacer" />
-              {value === o.canonical && <Icon name="check" />}
-            </button>
-          ))}
-        </div>
+        <div className="sheet-body">{children}</div>
       </div>
     </div>
+  );
+}
+
+// ---------- pilih mata kuliah ----------
+function SubjectPicker({
+  value,
+  onPick,
+  onClose,
+}: {
+  value: string;
+  onPick: (v: string) => void;
+  onClose: () => void;
+}) {
+  const options = [{ canonical: "", display: "Semua mata kuliah" }, ...SUBJECTS];
+  return (
+    <BottomSheet title="Pilih Mata Kuliah" onClose={onClose}>
+      <div className="sheet-list" style={{ padding: "0 0 4px" }}>
+        {options.map((o) => (
+          <button
+            key={o.canonical || "semua"}
+            className={`sheet-option ${value === o.canonical ? "active" : ""}`}
+            onClick={() => {
+              onPick(o.canonical);
+              onClose();
+            }}
+          >
+            <span className="item-icon">
+              <Icon name={o.canonical ? subjectIcon(o.canonical) : "grid"} />
+            </span>
+            {o.display}
+            <span className="spacer" />
+            {value === o.canonical && <Icon name="check" />}
+          </button>
+        ))}
+      </div>
+    </BottomSheet>
   );
 }
 
@@ -187,7 +233,7 @@ function SubjectDropdown({
   return (
     <>
       <button
-        className="subject-pill"
+        className={`subject-pill${value ? " selected" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`${label}: ${current}`}
@@ -201,27 +247,38 @@ function SubjectDropdown({
   );
 }
 
-// ---------- kartu-kartu ----------
+// ---------- tombol Zoom / link kelas ----------
 function ZoomButton({ item }: { item: ScheduleItem }) {
-  if (item.mode !== "zoom") return null;
-  if (item.isExample) {
-    return (
-      <p className="item-meta">
-        <span className="badge example">Contoh — link dummy</span> Link Zoom asli dimasukkan
-        kurator dari grup WA.
-      </p>
-    );
+  if (item.mode === "zoom") {
+    if (item.isExample) {
+      return (
+        <p className="item-meta">
+          <span className="badge example">Contoh — link dummy</span> Link Zoom asli dimasukkan
+          kurator dari grup WA.
+        </p>
+      );
+    }
+    if (item.location.startsWith("http")) {
+      return (
+        <p>
+          <a className="btn" href={item.location} target="_blank" rel="noreferrer">
+            Masuk Zoom
+          </a>
+        </p>
+      );
+    }
+    return <p className="item-meta">Link Zoom dimasukkan kurator.</p>;
   }
   if (item.location.startsWith("http")) {
     return (
       <p>
         <a className="btn" href={item.location} target="_blank" rel="noreferrer">
-          Buka Zoom
+          Buka link kelas
         </a>
       </p>
     );
   }
-  return <p className="item-meta">Link Zoom dimasukkan kurator.</p>;
+  return null;
 }
 
 // ---------- tombol hapus dua langkah (kurator) ----------
@@ -230,7 +287,8 @@ function ZoomButton({ item }: { item: ScheduleItem }) {
 // 5 detik, tombol kembali ke "Hapus". Tiap kartu punya instance sendiri,
 // jadi mempersenjatai satu kartu tidak mempersenjatai kartu lain. Sengaja
 // tidak pakai window.confirm — dialog itu tidak muncul/tepercaya di semua
-// browser.
+// browser. Perilaku ini adalah keputusan yang sudah terverifikasi live;
+// JANGAN diganti dengan perilaku hapus lain.
 function ConfirmDeleteButton({
   onConfirm,
   style,
@@ -269,9 +327,86 @@ function ConfirmDeleteButton({
   );
 }
 
-function ScheduleCard({ item, onDelete }: { item: ScheduleItem; onDelete?: () => void }) {
+// ---------- media gambar/video di kartu ----------
+function MediaBlock({
+  mediaType,
+  mediaUrl,
+  mediaFromUpload,
+}: {
+  mediaType: "" | "image" | "video";
+  mediaUrl: string;
+  mediaFromUpload: boolean;
+}) {
+  if (!mediaType || !mediaUrl) return null;
+  const caption = mediaFromUpload ? "Media unggahan kurator" : "Media dari URL";
+  const hideBroken = (e: React.SyntheticEvent) => {
+    const fig = (e.target as HTMLElement).closest("figure");
+    if (fig) (fig as HTMLElement).style.display = "none";
+  };
+  if (mediaType === "image") {
+    return (
+      <figure className="media-block">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={mediaUrl} alt="" onError={hideBroken} />
+        <figcaption>{caption}</figcaption>
+      </figure>
+    );
+  }
+  if (mediaType === "video") {
+    return (
+      <figure className="media-block">
+        {mediaUrl.includes("youtube.com/embed") || mediaUrl.includes("youtu.be/") ? (
+          <div className="video-wrap">
+            <iframe
+              src={mediaUrl}
+              title="Video"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        ) : (
+          <video controls src={mediaUrl} onError={hideBroken} />
+        )}
+        <figcaption>{caption}</figcaption>
+      </figure>
+    );
+  }
+  return null;
+}
+
+// ---------- kartu-kartu ----------
+function CuratorActions({
+  onEdit,
+  onDelete,
+}: {
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) {
+  if (!onEdit && !onDelete) return null;
   return (
-    <article className="card">
+    <p style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {onEdit && (
+        <button className="btn secondary small" onClick={onEdit}>
+          Ubah
+        </button>
+      )}
+      {onDelete && <ConfirmDeleteButton onConfirm={onDelete} />}
+    </p>
+  );
+}
+
+function ScheduleCard({
+  item,
+  onDelete,
+  onEdit,
+}: {
+  item: ScheduleItem;
+  onDelete?: () => void;
+  onEdit?: () => void;
+}) {
+  const past = isPastSchedule(item);
+  return (
+    <article className={`card${past ? " past" : ""}`}>
       <div className="item-row">
         <span className="item-icon">
           <Icon name={item.mode === "zoom" ? "clock" : "calendar"} />
@@ -300,66 +435,75 @@ function ScheduleCard({ item, onDelete }: { item: ScheduleItem; onDelete?: () =>
           )}
           {item.note && <p className="item-meta">{item.note}</p>}
           <ZoomButton item={item} />
-          {onDelete && (
-            <p style={{ marginTop: 10 }}>
-              <ConfirmDeleteButton onConfirm={onDelete} />
-            </p>
-          )}
+          <CuratorActions onEdit={onEdit} onDelete={onDelete} />
         </div>
       </div>
     </article>
   );
 }
 
-function InfoCard({ post, onDelete }: { post: InfoPost; onDelete?: () => void }) {
+function InfoCard({
+  post,
+  onDelete,
+  onEdit,
+}: {
+  post: InfoPost;
+  onDelete?: () => void;
+  onEdit?: () => void;
+}) {
+  const expired = isExpiredInfo(post);
   return (
-    <article className="card">
+    <article className={`card${expired ? " past" : ""}`}>
       {post.urgent && <span className="badge urgent">Penting</span>}{" "}
       {post.pinned && <span className="badge">Disematkan</span>}{" "}
       {post.isExample && <span className="badge example">Contoh</span>}
+      {expired && <span className="badge">Sudah berakhir</span>}
       <h3 className="item-title" style={{ marginTop: 8 }}>
         {post.title}
       </h3>
       <p className="item-meta" style={{ whiteSpace: "pre-wrap" }}>
         {post.body}
       </p>
+      <MediaBlock
+        mediaType={post.mediaType}
+        mediaUrl={post.mediaUrl}
+        mediaFromUpload={post.mediaFromUpload}
+      />
       <p className="item-meta" style={{ marginTop: 8 }}>
         {post.source}
         {post.subject ? ` · ${displaySubject(post.subject)}` : ""}
         {post.expiresDate ? ` · Berlaku s.d. ${shortDate(post.expiresDate)}` : ""}
       </p>
-      {onDelete && (
-        <p style={{ marginTop: 10 }}>
-          <ConfirmDeleteButton onConfirm={onDelete} />
-        </p>
-      )}
+      <CuratorActions onEdit={onEdit} onDelete={onDelete} />
     </article>
   );
 }
 
-function TaskCard({ task, onDelete }: { task: Task; onDelete?: () => void }) {
+function TaskCard({
+  task,
+  onDelete,
+  onEdit,
+}: {
+  task: Task;
+  onDelete?: () => void;
+  onEdit?: () => void;
+}) {
   const d = daysUntil(task.deadlineDate);
   const badge = d < 0 ? "Lewat" : d === 0 ? "Hari ini" : d === 1 ? "Besok" : `H-${d}`;
   const cls = d <= 2 ? "soon" : d <= 5 ? "mid" : "later";
   return (
     <article className="card">
-      <div className="item-row">
+      <div className="task-head">
+        <h3 className="item-title">{task.title}</h3>
         <span className={`deadline-badge ${cls}`}>{badge}</span>
-        <div style={{ flex: 1 }}>
-          {task.isExample && <span className="badge example">Contoh</span>}
-          <h3 className="item-title">{task.title}</h3>
-          <p className="item-meta">{task.description}</p>
-          <p className="item-meta" style={{ marginTop: 6 }}>
-            {displaySubject(task.subject)} · Tenggat {shortDate(task.deadlineDate)} ·{" "}
-            {task.deadlineTime} WIB
-          </p>
-          {onDelete && (
-            <p style={{ marginTop: 10 }}>
-              <ConfirmDeleteButton onConfirm={onDelete} />
-            </p>
-          )}
-        </div>
       </div>
+      {task.isExample && <span className="badge example">Contoh</span>}
+      <p className="item-meta">{task.description}</p>
+      <p className="item-meta" style={{ marginTop: 6 }}>
+        {displaySubject(task.subject)} · Tenggat {shortDate(task.deadlineDate)} ·{" "}
+        {task.deadlineTime} WIB
+      </p>
+      <CuratorActions onEdit={onEdit} onDelete={onDelete} />
     </article>
   );
 }
@@ -367,12 +511,15 @@ function TaskCard({ task, onDelete }: { task: Task; onDelete?: () => void }) {
 function ArticleCard({
   article,
   onDelete,
+  onEdit,
 }: {
   article: Article;
   onDelete?: () => void;
+  onEdit?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const isVideo = article.mediaType === "video" && article.mediaUrl.startsWith("http");
+  const wordCount = article.body.trim() ? article.body.trim().split(/\s+/).length : 0;
   return (
     <article className="card">
       {article.isExample && <span className="badge example">Contoh</span>}
@@ -381,7 +528,7 @@ function ArticleCard({
       </h3>
       <p className="item-meta">{article.summary}</p>
       <p className="item-meta" style={{ marginTop: 6 }}>
-        {displaySubject(article.subject)} · {article.readingMinutes} menit baca · {article.source}
+        {displaySubject(article.subject)} · ±{article.readingMinutes} menit baca · {article.source}
       </p>
       {open && (
         <>
@@ -395,7 +542,15 @@ function ArticleCard({
               />
             </div>
           )}
+          {article.mediaType === "image" && article.mediaUrl && (
+            <MediaBlock
+              mediaType="image"
+              mediaUrl={article.mediaUrl}
+              mediaFromUpload={article.mediaFromUpload}
+            />
+          )}
           <p className="article-body">{article.body}</p>
+          <p className="item-meta">±{wordCount} kata</p>
           {article.url && (
             <p>
               <a href={article.url} target="_blank" rel="noreferrer">
@@ -405,25 +560,28 @@ function ArticleCard({
           )}
         </>
       )}
-      <p style={{ marginTop: 10 }}>
-        <button className="btn secondary" onClick={() => setOpen(!open)}>
-          {open ? "Tutup artikel" : "Baca artikel"}
+      <p style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <button className="btn" onClick={() => setOpen(!open)}>
+          {open ? "Tutup artikel" : "Baca artikel →"}
         </button>
-        {onDelete && (
-          <ConfirmDeleteButton onConfirm={onDelete} style={{ marginLeft: 8 }} />
+        {onEdit && (
+          <button className="btn secondary small" onClick={onEdit}>
+            Ubah
+          </button>
         )}
+        {onDelete && <ConfirmDeleteButton onConfirm={onDelete} />}
       </p>
     </article>
   );
 }
 
-// ---------- panel kurator ----------
+// ---------- panel kurator (di dalam dialog login) ----------
 function CuratorPanel({
   board,
   onChanged,
   authed,
   onAuthChange,
-  remove,
+  onOpenForm,
   opError,
   setOpError,
 }: {
@@ -431,14 +589,22 @@ function CuratorPanel({
   onChanged: () => void;
   authed: boolean;
   onAuthChange: (v: boolean) => void;
-  remove: (collection: string, id: number) => Promise<void>;
+  onOpenForm: (type: "schedule" | "info" | "task" | "article") => void;
   opError: string;
   setOpError: (v: string) => void;
 }) {
+  const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState<"schedule" | "info" | "task" | "article" | null>(null);
+
+  useEffect(() => {
+    try {
+      setName(localStorage.getItem("bisdig-curator-name") ?? "");
+    } catch {
+      /* abaikan */
+    }
+  }, []);
 
   async function login(e: React.FormEvent) {
     e.preventDefault();
@@ -451,10 +617,15 @@ function CuratorPanel({
     });
     setBusy(false);
     if (r.ok) {
+      try {
+        localStorage.setItem("bisdig-curator-name", name.trim());
+      } catch {
+        /* abaikan */
+      }
       onAuthChange(true);
       setPassword("");
     } else {
-      setError("Password kurator salah.");
+      setError("Kode akses kurator salah.");
     }
   }
 
@@ -463,47 +634,41 @@ function CuratorPanel({
     onAuthChange(false);
   }
 
-  async function add(collection: string, item: Record<string, unknown>) {
-    setOpError("");
-    try {
-      const r = await fetch("/api/curator/items", {
-        body: JSON.stringify({ collection, item }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        setOpError(d.error ?? "Gagal menyimpan.");
-        return;
-      }
-      setForm(null);
-      onChanged();
-    } catch {
-      setOpError("Gagal menyimpan: tidak bisa menghubungi server. Periksa koneksi internet, lalu coba lagi.");
-    }
-  }
-
   if (!authed) {
     return (
       <form onSubmit={login} style={{ marginTop: 16 }}>
+        <label className="field-label" htmlFor="curator-name">
+          Nama kurator
+        </label>
+        <input
+          id="curator-name"
+          className="field"
+          type="text"
+          autoComplete="name"
+          placeholder="Nama kamu"
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
         <label className="field-label" htmlFor="curator-password">
-          Login Kurator
+          Kode akses kurator
         </label>
         <input
           id="curator-password"
           className="field"
           type="password"
           autoComplete="current-password"
-          placeholder="Password kurator"
+          placeholder="Kode akses kurator"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        {error && <p style={{ color: "#b91c1c" }}>{error}</p>}
-        <button className="btn" type="submit" disabled={busy}>
+        {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
+        <button className="btn btn-block" type="submit" disabled={busy}>
+          <Icon name="login" size={18} />
           {busy ? "Memeriksa…" : "Masuk sebagai Kurator"}
         </button>
         <p className="item-meta" style={{ marginTop: 8 }}>
-          Hanya admin prodi / PIC mata kuliah yang punya password ini.
+          Hanya admin prodi / PIC mata kuliah yang punya kode akses ini.
         </p>
       </form>
     );
@@ -525,29 +690,14 @@ function CuratorPanel({
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {(["schedule", "info", "task", "article"] as const).map((c) => (
-          <button key={c} className="btn secondary" onClick={() => setForm(form === c ? null : c)}>
+          <button key={c} className="btn secondary" onClick={() => onOpenForm(c)}>
             + Tambah{" "}
             {c === "schedule" ? "Jadwal" : c === "info" ? "Info" : c === "task" ? "Tugas" : "Artikel"}
           </button>
         ))}
       </div>
-      {form === "schedule" && (
-        <ScheduleForm
-          onCancel={() => setForm(null)}
-          onSubmit={(item) => add("schedule", item)}
-        />
-      )}
-      {form === "info" && (
-        <InfoForm onCancel={() => setForm(null)} onSubmit={(item) => add("info", item)} />
-      )}
-      {form === "task" && (
-        <TaskForm onCancel={() => setForm(null)} onSubmit={(item) => add("task", item)} />
-      )}
-      {form === "article" && (
-        <ArticleForm onCancel={() => setForm(null)} onSubmit={(item) => add("article", item)} />
-      )}
       {opError && (
-        <p role="alert" style={{ color: "#b91c1c" }}>
+        <p role="alert" style={{ color: "var(--danger)" }}>
           {opError}
         </p>
       )}
@@ -646,7 +796,7 @@ function CleanupPanel({ board, onChanged }: { board: Board; onChanged: () => voi
           )}
         </>
       )}
-      {error && <p style={{ color: "#b91c1c" }}>{error}</p>}
+      {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
       {msg && <p className="notice info">{msg}</p>}
     </div>
   );
@@ -661,27 +811,31 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+// ---------- form kurator (tampil di bottom sheet) ----------
+// initial diisi saat mode ubah; kosong saat mode tambah.
 function ScheduleForm({
+  initial,
+  submitLabel,
   onCancel,
   onSubmit,
 }: {
+  initial?: Partial<ScheduleItem>;
+  submitLabel: string;
   onCancel: () => void;
   onSubmit: (item: Record<string, unknown>) => void;
 }) {
   const [v, setV] = useState({
-    date: "",
-    endTime: "",
-    lecturer: "",
-    location: "",
-    mode: "kelas",
-    note: "",
-    startTime: "",
-    subject: "CRM",
+    date: initial?.date ?? "",
+    endTime: initial?.endTime ?? "",
+    lecturer: initial?.lecturer ?? "",
+    location: initial?.location ?? "",
+    mode: initial?.mode ?? "kelas",
+    note: initial?.note ?? "",
+    startTime: initial?.startTime ?? "",
+    subject: initial?.subject ?? "CRM",
   });
   return (
     <form
-      className="card"
-      style={{ marginTop: 12 }}
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit(v);
@@ -712,7 +866,7 @@ function ScheduleForm({
         <input className="field" value={v.location} onChange={(e) => setV({ ...v, location: e.target.value })} placeholder="BDIGI-7 atau https://zoom.us/j/..." />
       </Field>
       <Field label="Jenis">
-        <select className="field" value={v.mode} onChange={(e) => setV({ ...v, mode: e.target.value })}>
+        <select className="field" value={v.mode} onChange={(e) => setV({ ...v, mode: e.target.value as ScheduleItem["mode"] })}>
           <option value="kelas">Kelas reguler</option>
           <option value="zoom">Zoom</option>
           <option value="pengganti">Kelas pengganti</option>
@@ -722,24 +876,32 @@ function ScheduleForm({
       <Field label="Catatan">
         <input className="field" value={v.note} onChange={(e) => setV({ ...v, note: e.target.value })} />
       </Field>
-      <button className="btn" type="submit">Simpan jadwal</button>{" "}
+      <button className="btn" type="submit">{submitLabel}</button>{" "}
       <button className="btn secondary" type="button" onClick={onCancel}>Batal</button>
     </form>
   );
 }
 
 function InfoForm({
+  initial,
+  submitLabel,
   onCancel,
   onSubmit,
 }: {
+  initial?: Partial<InfoPost>;
+  submitLabel: string;
   onCancel: () => void;
   onSubmit: (item: Record<string, unknown>) => void;
 }) {
-  const [v, setV] = useState({ body: "", category: "pengumuman", source: "", subject: "", title: "" });
+  const [v, setV] = useState({
+    body: initial?.body ?? "",
+    category: initial?.category ?? "pengumuman",
+    source: initial?.source ?? "",
+    subject: initial?.subject ?? "",
+    title: initial?.title ?? "",
+  });
   return (
     <form
-      className="card"
-      style={{ marginTop: 12 }}
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit(v);
@@ -752,7 +914,7 @@ function InfoForm({
         <textarea className="field" rows={4} required value={v.body} onChange={(e) => setV({ ...v, body: e.target.value })} />
       </Field>
       <Field label="Kategori">
-        <select className="field" value={v.category} onChange={(e) => setV({ ...v, category: e.target.value })}>
+        <select className="field" value={v.category} onChange={(e) => setV({ ...v, category: e.target.value as InfoPost["category"] })}>
           <option value="pengumuman">Pengumuman</option>
           <option value="jadwal">Jadwal</option>
           <option value="tugas">Tugas</option>
@@ -770,24 +932,32 @@ function InfoForm({
       <Field label="Sumber">
         <input className="field" value={v.source} onChange={(e) => setV({ ...v, source: e.target.value })} placeholder="mis. Surat Edaran UDS" />
       </Field>
-      <button className="btn" type="submit">Simpan info</button>{" "}
+      <button className="btn" type="submit">{submitLabel}</button>{" "}
       <button className="btn secondary" type="button" onClick={onCancel}>Batal</button>
     </form>
   );
 }
 
 function TaskForm({
+  initial,
+  submitLabel,
   onCancel,
   onSubmit,
 }: {
+  initial?: Partial<Task>;
+  submitLabel: string;
   onCancel: () => void;
   onSubmit: (item: Record<string, unknown>) => void;
 }) {
-  const [v, setV] = useState({ deadlineDate: "", deadlineTime: "23:59", description: "", subject: "CRM", title: "" });
+  const [v, setV] = useState({
+    deadlineDate: initial?.deadlineDate ?? "",
+    deadlineTime: initial?.deadlineTime ?? "23:59",
+    description: initial?.description ?? "",
+    subject: initial?.subject ?? "CRM",
+    title: initial?.title ?? "",
+  });
   return (
     <form
-      className="card"
-      style={{ marginTop: 12 }}
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit(v);
@@ -812,24 +982,34 @@ function TaskForm({
       <Field label="Jam tenggat">
         <input className="field" type="time" value={v.deadlineTime} onChange={(e) => setV({ ...v, deadlineTime: e.target.value })} />
       </Field>
-      <button className="btn" type="submit">Simpan tugas</button>{" "}
+      <button className="btn" type="submit">{submitLabel}</button>{" "}
       <button className="btn secondary" type="button" onClick={onCancel}>Batal</button>
     </form>
   );
 }
 
 function ArticleForm({
+  initial,
+  submitLabel,
   onCancel,
   onSubmit,
 }: {
+  initial?: Partial<Article>;
+  submitLabel: string;
   onCancel: () => void;
   onSubmit: (item: Record<string, unknown>) => void;
 }) {
-  const [v, setV] = useState({ body: "", readingMinutes: 5, source: "", subject: "CRM", summary: "", title: "", url: "" });
+  const [v, setV] = useState({
+    body: initial?.body ?? "",
+    readingMinutes: initial?.readingMinutes ?? 5,
+    source: initial?.source ?? "",
+    subject: initial?.subject ?? "CRM",
+    summary: initial?.summary ?? "",
+    title: initial?.title ?? "",
+    url: initial?.url ?? "",
+  });
   return (
     <form
-      className="card"
-      style={{ marginTop: 12 }}
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit(v);
@@ -860,11 +1040,109 @@ function ArticleForm({
       <Field label="Waktu baca (menit)">
         <input className="field" type="number" min={1} value={v.readingMinutes} onChange={(e) => setV({ ...v, readingMinutes: Number(e.target.value) })} />
       </Field>
-      <button className="btn" type="submit">Simpan artikel</button>{" "}
+      <button className="btn" type="submit">{submitLabel}</button>{" "}
       <button className="btn secondary" type="button" onClick={onCancel}>Batal</button>
     </form>
   );
 }
+
+// ---------- navigasi dengan indikator geser ----------
+// Indikator gelap mengikuti tombol aktif (transisi pegas 0,38 detik).
+// Diukur dari posisi tombol yang sebenarnya, jadi tetap tepat bila
+// ukuran layar berubah.
+function useSlidingIndicator(activeIndex: number) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [style, setStyle] = useState({ width: 0, x: 0 });
+  const measure = () => {
+    const el = refs.current[activeIndex];
+    if (el) setStyle({ width: el.offsetWidth, x: el.offsetLeft });
+  };
+  useLayoutEffect(() => {
+    measure();
+  });
+  useEffect(() => {
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return { refs, style };
+}
+
+function DesktopNav({
+  tabs,
+  tab,
+  onChange,
+}: {
+  tabs: { id: Tab; label: string; icon: IconName }[];
+  tab: Tab;
+  onChange: (t: Tab) => void;
+}) {
+  const activeIndex = tabs.findIndex((t) => t.id === tab);
+  const { refs, style } = useSlidingIndicator(activeIndex);
+  return (
+    <nav className="desktop-nav" aria-label="Navigasi utama">
+      <span
+        className="seg-indicator"
+        style={{ transform: `translateX(${style.x}px)`, width: style.width }}
+        aria-hidden="true"
+      />
+      {tabs.map((t, i) => (
+        <button
+          key={t.id}
+          ref={(el) => {
+            refs.current[i] = el;
+          }}
+          className={tab === t.id ? "active" : ""}
+          onClick={() => onChange(t.id)}
+        >
+          {t.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function BottomNav({
+  tabs,
+  tab,
+  onChange,
+}: {
+  tabs: { id: Tab; label: string; icon: IconName }[];
+  tab: Tab;
+  onChange: (t: Tab) => void;
+}) {
+  const activeIndex = tabs.findIndex((t) => t.id === tab);
+  const { refs, style } = useSlidingIndicator(activeIndex);
+  return (
+    <nav className="bottom-nav" aria-label="Navigasi utama">
+      <span
+        className="nav-indicator"
+        style={{ transform: `translateX(${style.x}px)`, width: style.width }}
+        aria-hidden="true"
+      />
+      {tabs.map((t, i) => (
+        <button
+          key={t.id}
+          ref={(el) => {
+            refs.current[i] = el;
+          }}
+          className={tab === t.id ? "active" : ""}
+          onClick={() => onChange(t.id)}
+        >
+          <Icon name={t.icon} size={20} />
+          {t.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+type EditorState =
+  | { type: "schedule"; mode: "add" | "edit"; item?: ScheduleItem }
+  | { type: "info"; mode: "add" | "edit"; item?: InfoPost }
+  | { type: "task"; mode: "add" | "edit"; item?: Task }
+  | { type: "article"; mode: "add" | "edit"; item?: Article }
+  | null;
 
 // ---------- komponen utama ----------
 export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
@@ -872,6 +1150,7 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
   const [tab, setTab] = useState<Tab>("beranda");
   const [dark, setDark] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [editor, setEditor] = useState<EditorState>(null);
   const [jadwalSubject, setJadwalSubject] = useState("");
   const [infoSubject, setInfoSubject] = useState("");
   const [articleSubject, setArticleSubject] = useState("");
@@ -879,7 +1158,10 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
   const [infoQuery, setInfoQuery] = useState("");
   const [dateKicker, setDateKicker] = useState("");
   const [curatorAuthed, setCuratorAuthed] = useState(false);
+  const [curatorName, setCuratorName] = useState("");
   const [opError, setOpError] = useState("");
+  const [showPast, setShowPast] = useState(true);
+  const [nowTick, setNowTick] = useState(() => Date.now());
 
   useEffect(() => {
     setDark(document.documentElement.classList.contains("dark"));
@@ -892,6 +1174,17 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
         timeZone: "Asia/Jakarta",
       }).format(new Date()),
     );
+    try {
+      setCuratorName(localStorage.getItem("bisdig-curator-name") ?? "");
+    } catch {
+      /* abaikan */
+    }
+  }, []);
+
+  // Hitung ulang label countdown tiap menit.
+  useEffect(() => {
+    const t = window.setInterval(() => setNowTick(Date.now()), 60000);
+    return () => window.clearInterval(t);
   }, []);
 
   function toggleTheme() {
@@ -917,6 +1210,11 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
       .catch(() => undefined);
   }, []);
 
+  async function logout() {
+    await fetch("/api/curator/logout", { method: "POST" });
+    setCuratorAuthed(false);
+  }
+
   async function remove(collection: string, id: number) {
     setOpError("");
     try {
@@ -936,6 +1234,46 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
     }
   }
 
+  async function saveItem(collection: string, item: Record<string, unknown>) {
+    setOpError("");
+    try {
+      const r = await fetch("/api/curator/items", {
+        body: JSON.stringify({ collection, item }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setOpError(d.error ?? "Gagal menyimpan.");
+        return;
+      }
+      setEditor(null);
+      refreshBoard();
+    } catch {
+      setOpError("Gagal menyimpan: tidak bisa menghubungi server. Periksa koneksi internet, lalu coba lagi.");
+    }
+  }
+
+  async function updateItem(collection: string, id: number, patch: Record<string, unknown>) {
+    setOpError("");
+    try {
+      const r = await fetch("/api/curator/items", {
+        body: JSON.stringify({ collection, id, patch }),
+        headers: { "Content-Type": "application/json" },
+        method: "PUT",
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setOpError(d.error ?? "Gagal menyimpan perubahan.");
+        return;
+      }
+      setEditor(null);
+      refreshBoard();
+    } catch {
+      setOpError("Gagal menyimpan: tidak bisa menghubungi server. Periksa koneksi internet, lalu coba lagi.");
+    }
+  }
+
   const nextClass = useMemo(() => {
     const today = todayJakarta();
     const now = nowTimeJakarta();
@@ -944,6 +1282,14 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
     );
     return sorted.find((s) => s.date > today || (s.date === today && s.endTime > now));
   }, [board.schedule]);
+
+  const todayItems = useMemo(
+    () =>
+      board.schedule
+        .filter((s) => s.date === todayJakarta())
+        .sort((a, b) => a.startTime.localeCompare(b.startTime)),
+    [board.schedule],
+  );
 
   const zoomSoon = useMemo(
     () =>
@@ -958,22 +1304,24 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
     () =>
       [...board.tasks]
         .sort((a, b) => a.deadlineDate.localeCompare(b.deadlineDate))
-        .slice(0, 4),
+        .slice(0, 3),
     [board.tasks],
   );
 
   const jadwalFiltered = board.schedule.filter(
     (s) => !jadwalSubject || s.subject === jadwalSubject || displaySubject(s.subject) === displaySubject(jadwalSubject),
   );
+  const pastCount = jadwalFiltered.filter(isPastSchedule).length;
+  const jadwalVisible = showPast ? jadwalFiltered : jadwalFiltered.filter((s) => !isPastSchedule(s));
   const jadwalByDate = useMemo(() => {
     const map = new Map<string, ScheduleItem[]>();
-    for (const s of jadwalFiltered) {
+    for (const s of jadwalVisible) {
       const list = map.get(s.date) ?? [];
       list.push(s);
       map.set(s.date, list);
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [jadwalFiltered]);
+  }, [jadwalVisible]);
 
   const infoFiltered = board.info.filter((p) => {
     if (infoCategory !== "semua" && p.category !== infoCategory) return false;
@@ -997,6 +1345,13 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
     { icon: "book", id: "artikel", label: "Artikel" },
   ];
 
+  const editorTitles: Record<string, string> = {
+    article: "Artikel",
+    info: "Info",
+    schedule: "Jadwal",
+    task: "Tugas",
+  };
+
   return (
     <div className="container">
       <div className="topbar">
@@ -1010,21 +1365,39 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
           >
             <Icon name={dark ? "sun" : "moon"} />
           </button>
-          <button
-            className="icon-btn dark-solid"
-            onClick={() => setLoginOpen(true)}
-            aria-label="Login Kurator"
-            title="Login Kurator"
-          >
-            <Icon name="login" />
-          </button>
+          {curatorAuthed ? (
+            <>
+              <button
+                className="curator-pill"
+                onClick={() => setLoginOpen(true)}
+                title="Panel kurator"
+              >
+                <Icon name="login" size={14} />
+                {curatorName || "Kurator"}
+              </button>
+              <button className="btn secondary small" onClick={logout}>
+                Keluar
+              </button>
+            </>
+          ) : (
+            <button
+              className="icon-btn dark-solid"
+              onClick={() => setLoginOpen(true)}
+              aria-label="Login Kurator"
+              title="Login Kurator"
+            >
+              <Icon name="login" />
+            </button>
+          )}
         </div>
       </div>
 
       <Hero />
 
+      <DesktopNav tabs={tabs} tab={tab} onChange={setTab} />
+
       {opError && (
-        <p role="alert" style={{ color: "#b91c1c" }}>
+        <p role="alert" style={{ color: "var(--danger)" }}>
           {opError}
         </p>
       )}
@@ -1035,8 +1408,9 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
           {nextClass ? (
             <div className="next-class">
               <span className="chip">
-                <span className="live-dot" /> {dateLabel(nextClass.date)}
+                <span className="live-dot" /> {countdownLabel(nextClass, nowTick)}
               </span>{" "}
+              <span className="chip">{dateLabel(nextClass.date)}</span>{" "}
               <span className="chip">
                 {nextClass.mode === "zoom" ? "Zoom" : "Kelas reguler"}
               </span>
@@ -1057,9 +1431,36 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
                   : `Ruangan: ${nextClass.location}`}
               </p>
               <ZoomButton item={nextClass} />
+              {curatorAuthed && (
+                <p style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    className="btn secondary small"
+                    onClick={() => setEditor({ item: nextClass, mode: "edit", type: "schedule" })}
+                  >
+                    Ubah
+                  </button>
+                  <ConfirmDeleteButton onConfirm={() => remove("schedule", nextClass.id)} />
+                </p>
+              )}
             </div>
           ) : (
             <p className="empty">Tidak ada jadwal kelas berikutnya.</p>
+          )}
+
+          <h2 className="section-title">Jadwal Hari Ini</h2>
+          {todayItems.length === 0 ? (
+            <p className="empty">Tidak ada kelas terjadwal hari ini.</p>
+          ) : (
+            <div className="list">
+              {todayItems.map((s) => (
+                <ScheduleCard
+                  key={s.id}
+                  item={s}
+                  onDelete={curatorAuthed ? () => remove("schedule", s.id) : undefined}
+                  onEdit={curatorAuthed ? () => setEditor({ item: s, mode: "edit", type: "schedule" }) : undefined}
+                />
+              ))}
+            </div>
           )}
 
           <h2 className="section-title">Jadwal Zoom</h2>
@@ -1072,6 +1473,7 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
                   key={s.id}
                   item={s}
                   onDelete={curatorAuthed ? () => remove("schedule", s.id) : undefined}
+                  onEdit={curatorAuthed ? () => setEditor({ item: s, mode: "edit", type: "schedule" }) : undefined}
                 />
               ))}
             </div>
@@ -1087,6 +1489,7 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
                   key={t.id}
                   task={t}
                   onDelete={curatorAuthed ? () => remove("task", t.id) : undefined}
+                  onEdit={curatorAuthed ? () => setEditor({ item: t, mode: "edit", type: "task" }) : undefined}
                 />
               ))}
             </div>
@@ -1098,6 +1501,15 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
         <>
           <h2 className="section-title">Jadwal</h2>
           <SubjectDropdown value={jadwalSubject} onChange={setJadwalSubject} label="Filter mata kuliah jadwal" />
+          {pastCount > 0 && (
+            <p>
+              <button className="toggle-past" onClick={() => setShowPast(!showPast)}>
+                {showPast
+                  ? `Sembunyikan jadwal yang sudah lewat (${pastCount})`
+                  : `Tampilkan jadwal yang sudah lewat (${pastCount})`}
+              </button>
+            </p>
+          )}
           {jadwalByDate.length === 0 ? (
             <p className="empty">Tidak ada jadwal untuk filter ini.</p>
           ) : (
@@ -1110,6 +1522,7 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
                       key={s.id}
                       item={s}
                       onDelete={curatorAuthed ? () => remove("schedule", s.id) : undefined}
+                      onEdit={curatorAuthed ? () => setEditor({ item: s, mode: "edit", type: "schedule" }) : undefined}
                     />
                   ))}
                 </div>
@@ -1132,6 +1545,15 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
               value={infoQuery}
               onChange={(e) => setInfoQuery(e.target.value)}
             />
+            {infoQuery && (
+              <button
+                className="search-clear"
+                onClick={() => setInfoQuery("")}
+                aria-label="Bersihkan pencarian"
+              >
+                ×
+              </button>
+            )}
           </div>
           <p className="search-hint">Contoh pencarian: “beasiswa”, “CRM”, “KKN”.</p>
           <div className="pill-row" role="tablist" aria-label="Kategori info">
@@ -1155,6 +1577,7 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
                   key={p.id}
                   post={p}
                   onDelete={curatorAuthed ? () => remove("info", p.id) : undefined}
+                  onEdit={curatorAuthed ? () => setEditor({ item: p, mode: "edit", type: "info" }) : undefined}
                 />
               ))}
             </div>
@@ -1176,6 +1599,7 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
                     key={t.id}
                     task={t}
                     onDelete={curatorAuthed ? () => remove("task", t.id) : undefined}
+                    onEdit={curatorAuthed ? () => setEditor({ item: t, mode: "edit", type: "task" }) : undefined}
                   />
                 ))}
             </div>
@@ -1196,6 +1620,7 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
                   key={a.id}
                   article={a}
                   onDelete={curatorAuthed ? () => remove("article", a.id) : undefined}
+                  onEdit={curatorAuthed ? () => setEditor({ item: a, mode: "edit", type: "article" }) : undefined}
                 />
               ))}
             </div>
@@ -1216,8 +1641,17 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
               board={board}
               onChanged={refreshBoard}
               authed={curatorAuthed}
-              onAuthChange={setCuratorAuthed}
-              remove={remove}
+              onAuthChange={(v) => {
+                setCuratorAuthed(v);
+                if (v) {
+                  try {
+                    setCuratorName(localStorage.getItem("bisdig-curator-name") ?? "");
+                  } catch {
+                    /* abaikan */
+                  }
+                }
+              }}
+              onOpenForm={(type) => setEditor({ mode: "add", type })}
               opError={opError}
               setOpError={setOpError}
             />
@@ -1229,14 +1663,63 @@ export default function Dashboard({ initialBoard }: { initialBoard: Board }) {
         </div>
       )}
 
-      <nav className="bottom-nav" aria-label="Navigasi utama">
-        {tabs.map((t) => (
-          <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>
-            <Icon name={t.icon} size={22} />
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      {editor && (
+        <BottomSheet
+          title={`${editor.mode === "add" ? "Tambah" : "Ubah"} ${editorTitles[editor.type]}`}
+          onClose={() => setEditor(null)}
+        >
+          {editor.type === "schedule" && (
+            <ScheduleForm
+              initial={editor.mode === "edit" ? editor.item : undefined}
+              submitLabel={editor.mode === "add" ? "Simpan jadwal" : "Simpan perubahan"}
+              onCancel={() => setEditor(null)}
+              onSubmit={(v) =>
+                editor.mode === "add"
+                  ? saveItem("schedule", v)
+                  : updateItem("schedule", (editor.item as ScheduleItem).id, v)
+              }
+            />
+          )}
+          {editor.type === "info" && (
+            <InfoForm
+              initial={editor.mode === "edit" ? editor.item : undefined}
+              submitLabel={editor.mode === "add" ? "Simpan info" : "Simpan perubahan"}
+              onCancel={() => setEditor(null)}
+              onSubmit={(v) =>
+                editor.mode === "add"
+                  ? saveItem("info", v)
+                  : updateItem("info", (editor.item as InfoPost).id, v)
+              }
+            />
+          )}
+          {editor.type === "task" && (
+            <TaskForm
+              initial={editor.mode === "edit" ? editor.item : undefined}
+              submitLabel={editor.mode === "add" ? "Simpan tugas" : "Simpan perubahan"}
+              onCancel={() => setEditor(null)}
+              onSubmit={(v) =>
+                editor.mode === "add"
+                  ? saveItem("task", v)
+                  : updateItem("task", (editor.item as Task).id, v)
+              }
+            />
+          )}
+          {editor.type === "article" && (
+            <ArticleForm
+              initial={editor.mode === "edit" ? editor.item : undefined}
+              submitLabel={editor.mode === "add" ? "Simpan artikel" : "Simpan perubahan"}
+              onCancel={() => setEditor(null)}
+              onSubmit={(v) =>
+                editor.mode === "add"
+                  ? saveItem("article", v)
+                  : updateItem("article", (editor.item as Article).id, v)
+              }
+            />
+          )}
+        </BottomSheet>
+      )}
+
+      <BottomNav tabs={tabs} tab={tab} onChange={setTab} />
 
       <footer className="footer">Dashboard Informasi Terkurasi • 2026</footer>
     </div>
